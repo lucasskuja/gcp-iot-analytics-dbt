@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: stg_iot_energy_events
+    description: "Staging incremental model for cleaned IoT sensor events."
+    columns:
+      - name: event_sk
+        description: "Surrogate key for deduplicated events."
+        tests:
+          - not_null
+          - unique
+      - name: device_id
+        description: "Unique device identifier."
+        tests:
+          - not_null
+      - name: building_id
+        description: "Building identifier."
+        tests:
+          - not_null
+      - name: event_timestamp
+        description: "Normalized event timestamp."
+        tests:
+          - not_null
+      - name: status_normalized
+        description: "Normalized device status."
+        tests:
+          - accepted_values:
+              values: ['online', 'offline', 'unknown']

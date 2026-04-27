@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: mart_building_energy_kpis
+    description: "Daily building-level KPIs for energy monitoring."
+    columns:
+      - name: building_id
+        description: "Building identifier."
+        tests:
+          - not_null
+      - name: event_date
+        description: "Date grain of the mart."
+        tests:
+          - not_null
+      - name: building_avg_energy_kwh
+        description: "Average energy consumption for the building."
+  - name: mart_energy_anomalies
+    description: "Hourly anomaly detection based on simple z-score."
+    columns:
+      - name: is_anomaly
+        description: "Flag indicating anomalous hourly consumption."

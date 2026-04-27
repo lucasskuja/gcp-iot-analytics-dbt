@@ -1,0 +1,17 @@
+version: 2
+
+models:
+  - name: int_device_hourly_energy
+    description: "Hourly aggregation by device used by marts and anomaly detection."
+    columns:
+      - name: event_hour
+        description: "Hour bucket of the event."
+        tests:
+          - not_null
+      - name: avg_energy_kwh
+        description: "Average energy consumption in the hour."
+  - name: int_device_daily_quality
+    description: "Daily quality metrics per device."
+    columns:
+      - name: events_received
+        description: "Number of events received after deduplication."

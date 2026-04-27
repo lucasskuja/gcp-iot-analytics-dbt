@@ -1,0 +1,36 @@
+name: composer-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "composer/**"
+  workflow_dispatch:
+
+jobs:
+  sync-composer-bucket:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_CI_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Sync dags
+        run: gcloud storage rsync composer/dags gs://${{ secrets.COMPOSER_DAG_BUCKET }}/dags --recursive --delete-unmatched-destination-objects
+
+      - name: Sync plugins
+        run: gcloud storage rsync composer/plugins gs://${{ secrets.COMPOSER_DAG_BUCKET }}/plugins --recursive --delete-unmatched-destination-objects
+
+      - name: Sync data
+        run: gcloud storage rsync composer/data gs://${{ secrets.COMPOSER_DAG_BUCKET }}/data --recursive --delete-unmatched-destination-objects

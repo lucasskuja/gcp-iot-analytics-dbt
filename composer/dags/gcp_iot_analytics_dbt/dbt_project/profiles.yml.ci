@@ -1,0 +1,24 @@
+gcp_iot_analytics_dbt:
+  target: ci
+  outputs:
+    ci:
+      type: bigquery
+      method: service-account-json
+      project: "{{ env_var('GCP_PROJECT_ID', 'demo-project') }}"
+      dataset: "{{ env_var('BQ_DATASET_ANALYTICS', 'analytics_iot_energy') }}"
+      threads: 2
+      keyfile_json:
+        type: service_account
+        project_id: "{{ env_var('GCP_PROJECT_ID', 'demo-project') }}"
+        private_key_id: "ci-placeholder"
+        private_key: "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\\n-----END PRIVATE KEY-----\\n"
+        client_email: "ci-placeholder@{{ env_var('GCP_PROJECT_ID', 'demo-project') }}.iam.gserviceaccount.com"
+        client_id: "12345678901234567890"
+        auth_uri: "https://accounts.google.com/o/oauth2/auth"
+        token_uri: "https://oauth2.googleapis.com/token"
+        auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs"
+        client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/ci-placeholder"
+      location: "{{ env_var('GCP_REGION', 'us-central1') }}"
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1

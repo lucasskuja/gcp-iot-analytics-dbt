@@ -1,0 +1,13 @@
+gcp_iot_analytics_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: your-gcp-project
+      dataset: analytics_iot_energy
+      threads: 4
+      location: us-central1
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1

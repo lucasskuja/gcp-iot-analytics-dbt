@@ -1,0 +1,37 @@
+name: python-ci
+
+on:
+  pull_request:
+    paths:
+      - "integrations/**"
+      - "composer/dags/gcp_iot_analytics_dbt/iot_energy_pipeline.py"
+  push:
+    branches: [main]
+    paths:
+      - "integrations/**"
+      - "composer/dags/gcp_iot_analytics_dbt/iot_energy_pipeline.py"
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r integrations/iot_energy_ingestion/requirements.txt
+
+      - name: Run unit tests
+        run: pytest integrations/iot_energy_ingestion/tests -q
+
+      - name: Smoke check Python syntax
+        run: python -m compileall composer integrations

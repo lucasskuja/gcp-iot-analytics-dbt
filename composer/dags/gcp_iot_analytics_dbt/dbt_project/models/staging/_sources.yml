@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: raw_iot_energy
+    database: "{{ env_var('GCP_PROJECT_ID', 'demo-project') }}"
+    schema: "{{ env_var('BQ_DATASET_RAW', 'raw_iot_energy') }}"
+    description: "Raw dataset loaded from GCS into BigQuery."
+    freshness:
+      warn_after: {count: 6, period: hour}
+      error_after: {count: 12, period: hour}
+    loaded_at_field: ingested_at
+    tables:
+      - name: iot_energy_events_raw
+        description: "Raw IoT events including duplicates, late arrivals and invalid metrics."
+        columns:
+          - name: event_id
+            description: "Business event identifier generated from device and timestamp."
+          - name: timestamp
+            description: "Original event timestamp."
+          - name: status
+            description: "Device connectivity state from the sensor payload."
