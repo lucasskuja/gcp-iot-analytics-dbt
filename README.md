@@ -1,85 +1,243 @@
 # gcp-iot-analytics-dbt
 
-Repositorio que implementa uma plataforma de dados em GCP para monitoramento de consumo energetico de dispositivos IoT em predios inteligentes. O desenho foi evoluido para um fluxo mais proximo de producao: ingestao batch em `Cloud Run Jobs`, orquestracao em `Cloud Composer`, transformacao analitica via `dbt-bigquery` e base pronta para CI de deploy por dominio.
+Production-style GCP data platform for IoT energy monitoring, built with Cloud Run Jobs, Cloud Composer, BigQuery, dbt, Terraform, and GitHub Actions.
 
-## Visao geral
+This repository represents an end-to-end analytics platform for smart-building energy telemetry. It is designed to look and operate like a real delivery unit rather than a notebook-driven demo: ingestion is containerized, orchestration is explicit, infrastructure is provisioned as code, analytics models are tested, and deployment paths are separated by domain.
 
-O pipeline cobre quatro camadas:
+## Overview
 
-1. `RAW`: arquivos JSONL gerados em Python e armazenados no `GCS`, com carga incremental no `BigQuery`
-2. `STAGING`: limpeza, deduplicacao, tipagem e tratamento inicial de inconsistencias
-3. `INTERMEDIATE`: regras de negocio e agregacoes reutilizaveis
-4. `MART`: KPIs analiticos prontos para consumo
+The platform simulates batch ingestion of IoT energy events from distributed building devices and turns raw telemetry into analytics-ready datasets for operational monitoring and business reporting.
 
-## Arquitetura
+It focuses on the kinds of engineering concerns that matter in production environments:
+
+- reliable orchestration across ingestion and transformation stages
+- modular data platform design on GCP
+- analytics engineering with layered dbt models
+- infrastructure as code for repeatable provisioning
+- CI/CD workflows aligned to repository domains
+- data quality controls for imperfect upstream data
+- cost-aware warehouse design using partitioning, clustering, and incremental processing
+
+## Business context
+
+Smart-building environments generate high-frequency telemetry from meters, sensors, and edge devices. That data is operationally valuable, but only if the platform can handle common real-world issues such as duplicates, nulls, delayed events, unstable device status, and the need to reprocess data without rebuilding everything from scratch.
+
+This repository models that scenario with a production-oriented architecture:
+
+- raw telemetry lands in low-cost object storage for replay and auditability
+- ingestion is executed as an isolated batch workload
+- analytics logic is managed separately from ingestion code
+- orchestration coordinates dependencies, retries, and execution order
+- curated marts expose energy KPIs and anomaly signals for downstream consumption
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    A[Cloud Composer / Airflow DAG] --> B[Cloud Run Job - ingestion]
-    B --> C[GCS Raw Bucket]
-    B --> D[BigQuery Raw Dataset]
-    A --> E[dbt-bigquery no Composer]
-    E --> F[Staging]
-    E --> G[Intermediate]
-    E --> H[Mart]
-    A --> I[dbt snapshot]
-    A --> J[dbt test]
-    A --> K[Logs, retries and mocked alerts]
+    A["Cloud Composer / Airflow DAG"] --> B["Cloud Run Job: batch ingestion"]
+    B --> C["GCS raw bucket"]
+    B --> D["BigQuery raw dataset"]
+    A --> E["dbt deps / run / snapshot / test"]
+    E --> F["Staging models"]
+    E --> G["Intermediate models"]
+    E --> H["Mart models"]
+    A --> I["Pipeline metrics and mocked alerts"]
+    J["Terraform"] --> B
+    J --> C
+    J --> D
+    J --> K["BigQuery analytics dataset"]
+    J --> L["Artifact Registry"]
+    J --> A
+    M["GitHub Actions"] --> J
+    M --> B
+    M --> A
+    M --> E
 ```
 
-## Estrutura do repositorio
+## Why this design
+
+### Cloud Run Jobs for ingestion
+
+The ingestion workload is finite, scheduled, and container-friendly, which makes Cloud Run Jobs a better fit than a long-running service. This keeps ingestion isolated, versioned, and independently deployable.
+
+Trade-off: the platform takes on container build, image promotion, and runtime configuration management instead of relying on a simpler script-only execution model.
+
+### Cloud Composer for orchestration
+
+Composer was chosen to model a production-style orchestration layer with explicit task dependencies across ingestion, dbt execution, retries, and operational logging. It reflects the kind of tooling commonly used in larger data platforms.
+
+Trade-off: Composer brings meaningful fixed cost and more operational overhead than lightweight serverless schedulers, but it improves credibility for enterprise-grade orchestration scenarios.
+
+### BigQuery as warehouse and compute engine
+
+BigQuery supports the storage and analytical access patterns required here while integrating well with GCS, Cloud Run, and dbt. Partitioning, clustering, and incremental model strategies help keep query cost under control.
+
+Trade-off: warehouse cost discipline must be intentional. Poor partition filters or overly broad transformations can quickly increase scan volume.
+
+### dbt for analytics engineering
+
+dbt provides a clean separation between raw ingestion and analytical transformation. The project uses staging, intermediate, and mart layers, plus tests and snapshots, to demonstrate maintainable analytical modeling rather than ad hoc SQL.
+
+Trade-off: dbt introduces an additional runtime dependency that must be installed and versioned in Composer.
+
+### Terraform for platform provisioning
+
+Infrastructure is defined as code so the platform can be reproduced, reviewed, and evolved through standard engineering workflows rather than manual console setup.
+
+Trade-off: Terraform adds lifecycle management overhead, but it strengthens repeatability, traceability, and operational maturity.
+
+## Repository structure
 
 ```text
 .
-├── composer/
-│   ├── dags/
-│   │   └── gcp_iot_analytics_dbt/
-│   │       ├── iot_energy_pipeline.py
-│   │       └── dbt_project/
-│   ├── plugins/
-│   └── data/
-├── integrations/
-│   └── iot_energy_ingestion/
-├── infra/
-│   └── terraform/
-├── docs/
-└── .github/
-    └── workflows/
+|-- .github/
+|   `-- workflows/
+|-- composer/
+|   |-- dags/
+|   |   `-- gcp_iot_analytics_dbt/
+|   |       |-- iot_energy_pipeline.py
+|   |       `-- dbt_project/
+|   |-- plugins/
+|   `-- data/
+|-- docs/
+|-- infra/
+|   `-- terraform/
+`-- integrations/
+    `-- iot_energy_ingestion/
 ```
 
-## Decisoes tecnicas e trade-offs
+### Structure by delivery domain
 
-- `Cloud Run Jobs` foi escolhido para ingestao porque o workload e batch, finito e agendado. Trade-off: exige pipeline de container, versionamento de imagem e estrategia de deploy.
-- `Cloud Composer` foi mantido para orquestracao porque o projeto precisa coordenar dependencias explicitas entre ingestao e transformacao. Trade-off: maior custo fixo e operacao mais pesada.
-- `dbt-bigquery` executa as camadas analiticas diretamente no BigQuery. Trade-off: o ambiente do Composer precisa ter as dependencias Python do dbt instaladas.
-- `composer/` agora representa o artefato sincronizado para o bucket do Composer. Trade-off: exige disciplina de layout, mas melhora o fluxo de CI/CD.
-- `BigQuery` segue como warehouse principal pelas capacidades de particionamento, clustering e boa integracao com dbt. Trade-off: custo por scan precisa ser controlado com incremental e filtros por particao.
+- `integrations/`
+  Containerized ingestion code intended for execution outside Composer, with its own dependencies, tests, and image lifecycle.
+- `composer/`
+  The deployment artifact synced to the Composer bucket, including DAGs and the dbt project used by orchestration.
+- `infra/terraform/`
+  Infrastructure definitions for storage, compute, IAM, warehouse, and orchestration resources.
+- `.github/workflows/`
+  CI/CD workflows split by concern so changes can be validated and deployed selectively.
+- `docs/`
+  Supporting architecture notes and implementation rationale.
 
-## Fluxo operacional
+## Data flow
 
-1. A DAG em `composer/dags/gcp_iot_analytics_dbt/` executa um `Cloud Run Job` com o codigo da pasta `integrations/iot_energy_ingestion/`.
-2. O job gera eventos IoT sinteticos com problemas reais de qualidade.
-3. O job grava o arquivo bruto no `GCS`.
-4. O job faz `load append` no `BigQuery` raw particionado.
-5. A DAG executa `dbt deps`, `dbt run`, `dbt snapshot` e `dbt test` usando o projeto dbt que esta no proprio bucket do Composer.
-6. A DAG publica logs e alertas mockados.
+1. A Cloud Composer DAG schedules the daily pipeline execution.
+2. Composer triggers a Cloud Run Job dedicated to batch ingestion.
+3. The ingestion job generates IoT telemetry with intentionally realistic data quality issues such as duplicates, nulls, negative values, and late-arriving records.
+4. Raw JSONL files are persisted to GCS as a replayable landing layer.
+5. The same job appends raw events to a partitioned BigQuery dataset.
+6. Composer executes `dbt deps`, `dbt run`, `dbt snapshot`, and `dbt test`.
+7. dbt transforms raw events into cleaned staging models, reusable intermediate models, and business-facing marts.
+8. The pipeline emits operational logs and mocked observability signals.
 
-## Como rodar localmente
+## Analytics model layers
 
-### Pre-requisitos
+The dbt project follows a layered design to improve maintainability and reduce coupling between ingestion behavior and downstream analytics logic.
+
+- `staging`
+  Standardizes field names, typing, deduplication logic, and status normalization for raw IoT events.
+- `intermediate`
+  Encapsulates reusable business logic such as hourly energy rollups and daily data quality metrics.
+- `marts`
+  Publishes analytics-ready outputs, including building-level energy KPIs and anomaly detection views.
+- `snapshots`
+  Tracks slowly changing device status history.
+- `tests`
+  Combines schema tests with custom SQL assertions for non-negative energy, null-ratio thresholds, and recent-data checks.
+
+## Operational flow
+
+The main DAG is defined in `composer/dags/gcp_iot_analytics_dbt/iot_energy_pipeline.py` and orchestrates the platform in a linear, production-readable order:
+
+1. run ingestion job in Cloud Run
+2. install dbt dependencies
+3. build transformation models
+4. snapshot mutable status data
+5. run data quality tests
+6. emit pipeline metrics and mocked alerts
+
+This sequencing intentionally favors operational clarity over unnecessary DAG complexity.
+
+## Infrastructure
+
+Terraform provisions the core platform components:
+
+- GCS raw bucket with lifecycle policy for lower-cost archival storage
+- BigQuery raw dataset
+- BigQuery analytics dataset
+- Artifact Registry repository for ingestion images
+- Cloud Run Job for ingestion execution
+- Cloud Composer environment for orchestration
+- service accounts and IAM bindings for workload separation
+
+The infrastructure design demonstrates awareness of runtime boundaries and least-privilege responsibilities between ingestion and orchestration layers.
+
+## CI/CD
+
+The repository includes domain-oriented GitHub Actions workflows:
+
+- `python-ci.yml`
+  Runs unit tests for the ingestion code and performs a Python syntax smoke check.
+- `dbt-ci.yml`
+  Installs dbt, validates project structure, compiles models, and generates docs metadata.
+- `terraform.yml`
+  Runs `terraform fmt`, `terraform init -backend=false`, and `terraform validate`.
+- `iot-energy-ingestion-image.yml`
+  Builds the ingestion container image, pushes it to Artifact Registry, and updates the Cloud Run Job image.
+- `composer-sync.yml`
+  Syncs the `composer/` deployment artifact to the Composer bucket.
+
+This separation is intentional: code paths can evolve independently, and release activity stays closer to the relevant delivery domain.
+
+## Data quality and observability
+
+The project is designed to show how a platform handles imperfect operational data instead of assuming ideal inputs.
+
+Simulated upstream issues include:
+
+- duplicate events from retransmission
+- null measurements
+- negative energy values
+- delayed event arrival
+- intermittent offline device status
+
+Implemented controls include:
+
+- dbt schema tests
+- custom SQL assertions
+- retries at the orchestration layer
+- unit tests for ingestion behavior
+- structured raw persistence for replay and forensic analysis
+- pipeline log emission and mocked alert hooks
+
+## Cost-awareness
+
+The warehouse and storage design reflect common cloud cost controls:
+
+- partitioned BigQuery tables on event date
+- clustering on high-value access keys such as `building_id` and `device_id`
+- incremental processing patterns with reprocessing windows for late-arriving data
+- GCS as a lower-cost raw persistence layer
+- selective CI/CD by repository path to avoid unnecessary deployment work
+
+One intentional trade-off is the use of Composer. It improves orchestration realism and enterprise fit, but it is also the largest fixed-cost component in the architecture.
+
+## Local development
+
+### Prerequisites
 
 - Python 3.11+
 - Docker
 - `dbt-bigquery`
-- credenciais GCP com permissao em GCS e BigQuery
-- variaveis de ambiente:
+- Google Cloud credentials with access to GCS and BigQuery
+- environment variables:
   - `GCP_PROJECT_ID`
   - `GCP_REGION`
   - `BQ_DATASET_RAW`
   - `BQ_DATASET_ANALYTICS`
   - `GCS_RAW_BUCKET`
 
-### 1. Ingestao local
+### Run ingestion locally
 
 ```powershell
 cd integrations/iot_energy_ingestion
@@ -89,19 +247,19 @@ pip install -r requirements.txt
 python run_ingestion.py --execution-date 2026-04-26T10:00:00 --output-dir data
 ```
 
-### 2. Build da imagem de ingestao
+### Build the ingestion image
 
 ```bash
 cd integrations/iot_energy_ingestion
 docker build -t us-central1-docker.pkg.dev/<project-id>/iot-platform/iot-ingestion:latest .
 ```
 
-### 3. dbt local
+### Validate dbt locally
 
 ```bash
 cd composer/dags/gcp_iot_analytics_dbt/dbt_project
 pip install dbt-bigquery
-dbt deps
+dbt deps --profiles-dir .
 dbt debug --profiles-dir .
 dbt run --profiles-dir .
 dbt snapshot --profiles-dir .
@@ -109,80 +267,34 @@ dbt test --profiles-dir .
 dbt docs generate --profiles-dir .
 ```
 
-### 4. Composer
+### Deploy to Composer
 
-Sincronize a pasta `composer/` para o bucket do Composer, respeitando a estrutura `dags/`, `plugins/` e `data/`. O ambiente deve instalar os pacotes descritos em `composer/requirements-composer.txt`.
+Sync the `composer/` directory to the Composer bucket while preserving the `dags/`, `plugins/`, and `data/` layout. The Composer environment must install the dependencies listed in `composer/requirements-composer.txt`.
 
-## CI/CD
+## Trade-offs and limitations
 
-O repositorio inclui workflows iniciais em `.github/workflows/`:
+- Composer increases architectural realism and orchestration capability, but it is expensive compared with lighter scheduling options.
+- The current observability step emits mocked metrics and mocked alerts rather than integrating directly with Cloud Monitoring or PagerDuty-style channels.
+- dbt CI validates structure and compilation, but it does not run warehouse-backed integration tests against a live BigQuery environment.
+- The container deployment workflow is tailored to the current ingestion job; a larger platform with many integrations would likely evolve to a matrix-based or generated deployment strategy.
+- The Terraform definition assumes required APIs, quotas, and network configuration are available in the target GCP account.
 
-- `composer-sync.yml`: sincroniza `composer/dags`, `composer/plugins` e `composer/data` para o bucket do Composer quando houver mudancas em `composer/**`
-- `terraform.yml`: executa `terraform fmt`, `terraform init -backend=false` e `terraform validate` quando houver mudancas em `infra/terraform/**`
-- `iot-energy-ingestion-image.yml`: faz build, push e atualizacao da imagem do `Cloud Run Job` quando houver mudancas em `integrations/iot_energy_ingestion/**`
-- `dbt-ci.yml`: valida o projeto dbt com `dbt deps`, `dbt parse` e `dbt compile` quando houver mudancas no projeto analitico
-- `python-ci.yml`: executa testes unitarios da integracao e smoke check de sintaxe Python em PR e push
+## What this project demonstrates
 
-Segredos esperados no GitHub Actions:
+This repository is positioned as a portfolio asset for senior data engineering work. It demonstrates:
 
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`
-- `GCP_CI_SERVICE_ACCOUNT`
-- `COMPOSER_DAG_BUCKET`
-- `GCP_PROJECT_ID`
-- `GCP_REGION`
-- `ARTIFACT_REGISTRY_REPOSITORY`
-- `IOT_ENERGY_INGESTION_JOB_NAME`
+- hands-on cloud data platform implementation on GCP
+- orchestration across ingestion, transformation, testing, and operational signaling
+- analytics engineering with dbt layer design, snapshots, and custom tests
+- infrastructure as code for reproducible platform provisioning
+- CI/CD aligned to repository boundaries and runtime responsibilities
+- production-aware thinking around reliability, maintainability, and cloud cost
+- business-oriented design that turns telemetry into usable operational KPIs
 
-## Infraestrutura
+## Future improvements
 
-O Terraform provisiona:
-
-- bucket raw no `GCS`
-- datasets raw e analytics no `BigQuery`
-- `Artifact Registry` para a imagem do job
-- `Cloud Run Job` para ingestao
-- `Cloud Composer` para orquestracao
-- service accounts e IAM basicos para Composer e Cloud Run
-
-## Otimizacao de custo no BigQuery
-
-- tabelas particionadas por `event_date` ou `timestamp`
-- clustering por `building_id`, `device_id` e `status`
-- modelos incrementais com janela de reprocessamento para late arriving data
-- filtros em `is_incremental()` para evitar full scan
-- armazenamento raw em `GCS` para replay barato
-
-## Estimativa de custos
-
-Cenario de laboratorio:
-
-- `GCS`: poucos MB por dia, custo muito baixo
-- `BigQuery storage`: abaixo de 10 GB na simulacao
-- `BigQuery compute`: `dbt run/test/snapshot` com particionamento e incremental tende a manter scans em faixa baixa
-- `Cloud Run Jobs`: custo proporcional a execucoes e CPU/memoria do job
-- `Composer`: principal componente de custo fixo da arquitetura
-
-Trade-off importante:
-
-- `Composer` deixa a arquitetura mais crivel para ambientes enterprise, mas aumenta bastante o custo mensal comparado a alternativas mais serverless.
-
-## Problemas reais simulados
-
-- duplicidade por reenvio do dispositivo
-- valores nulos
-- consumo negativo
-- eventos atrasados
-- gaps de conectividade
-
-## Limitacoes
-
-- alertas continuam mockados em log
-- o workflow de imagem cobre a integracao atual, mas um projeto com varias integracoes pode evoluir para uma estrategia matrix ou gerador de pipelines
-- o ambiente Composer descrito em Terraform depende de rede, APIs e quotas disponiveis na conta GCP
-- o CI de dbt valida estrutura e compilacao, mas nao executa `dbt run/test` contra um BigQuery real
-
-## Melhorias futuras
-
-- acoplar Cloud Monitoring e notificacoes reais
-- adicionar semantic layer e camada de serving para BI
-- incluir testes de contrato e observabilidade mais avancada
+- integrate real monitoring, metrics sinks, and notification channels
+- add deeper data contract and freshness enforcement
+- introduce a serving layer for BI or application-facing consumption
+- expand anomaly detection beyond simple z-score logic
+- extend deployment patterns to support multiple independent ingestion jobs at scale
