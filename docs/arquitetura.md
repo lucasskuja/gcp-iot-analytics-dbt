@@ -1,177 +1,177 @@
-# Arquitetura da Plataforma de Dados
+# Data Platform Architecture
 
-## Objetivo
+## Objective
 
-Esta plataforma simula um ambiente moderno de dados no GCP para monitoramento energetico de dispositivos IoT em predios inteligentes. O foco esta em mostrar decisoes de arquitetura, trade-offs, preocupacao com custo e um desenho de deploy mais crivel para producao.
+This platform simulates a modern GCP-based data environment for monitoring energy consumption from IoT devices in smart buildings. The goal is to showcase architecture decisions, technical trade-offs, cloud cost awareness, and a deployment model that is closer to how production data platforms are actually structured.
 
-## Estrutura operacional do repositorio
+## Repository operating model
 
-O repositorio agora separa melhor o que e codigo fonte e o que e artefato de deploy:
+The repository is intentionally organized to separate source code from deployment artifacts:
 
-- `integrations/`: codigo Python containerizado para jobs de integracao
-- `composer/`: conteudo sincronizado para o bucket do `Cloud Composer`
-- `infra/terraform/`: infraestrutura GCP
-- `docs/`: documentacao arquitetural
+- `integrations/`: containerized Python workloads for ingestion jobs
+- `composer/`: content synchronized to the Cloud Composer bucket
+- `infra/terraform/`: GCP infrastructure as code
+- `docs/`: architecture and design documentation
 
-Dentro de `composer/`, a estrutura segue o formato do bucket do Composer:
+Inside `composer/`, the structure follows the same layout expected by the Composer bucket:
 
 - `composer/dags/`
 - `composer/plugins/`
 - `composer/data/`
 
-O projeto dbt foi colocado em `composer/dags/gcp_iot_analytics_dbt/dbt_project/` para que a DAG consiga rodar `dbt-bigquery` no proprio ambiente do Composer sem depender de checkout externo do repositorio.
+The dbt project lives in `composer/dags/gcp_iot_analytics_dbt/dbt_project/` so the DAG can execute `dbt-bigquery` directly in the Composer runtime without requiring an external repository checkout.
 
-Dentro de `integrations/`, cada pasta representa uma unidade de deploy independente. Isso aproxima o repositorio de um setup real em que diferentes jobs de integracao podem ter ciclos de release proprios.
+Inside `integrations/`, each directory represents an independently deployable unit. This mirrors a more realistic platform setup in which multiple ingestion jobs may have their own runtime dependencies and release cycles.
 
-## Desenho de producao adotado
+## Adopted production-style flow
 
-1. `Cloud Composer` agenda e orquestra o pipeline.
-2. A DAG executa um `Cloud Run Job` para ingestao batch, atualmente empacotado em `integrations/iot_energy_ingestion/`.
-3. O job gera os dados IoT sinteticos, grava o raw no `GCS` e carrega o raw no `BigQuery`.
-4. A DAG executa `dbt deps`, `dbt run`, `dbt snapshot` e `dbt test` usando o projeto dbt que foi sincronizado para o bucket do Composer.
-5. O pipeline finaliza com logs, metricas basicas e alertas mockados.
+1. `Cloud Composer` schedules and orchestrates the pipeline.
+2. The DAG triggers a batch `Cloud Run Job`, currently packaged under `integrations/iot_energy_ingestion/`.
+3. The job generates synthetic IoT telemetry, writes the raw file to `GCS`, and loads the raw data into `BigQuery`.
+4. The DAG runs `dbt deps`, `dbt run`, `dbt snapshot`, and `dbt test` using the dbt project synchronized to the Composer bucket.
+5. The pipeline finishes with logs, basic metrics, and mocked alerts.
 
-## Por que cada tecnologia foi escolhida
+## Why each technology was chosen
 
 ### Cloud Run Jobs
 
-Foi escolhido para a ingestao porque o workload e batch e finito. Isso combina melhor com `Jobs` do que com um servico HTTP.
+Cloud Run Jobs was chosen for ingestion because the workload is finite and batch-oriented. That makes Jobs a stronger fit than an always-on HTTP service.
 
-Vantagens:
+Advantages:
 
-- serverless
-- bom para cargas agendadas
-- escala simples
-- separa claramente o runtime da ingestao
-
-Trade-offs:
-
-- exige build e versionamento de imagem
-- observabilidade e debugging dependem de logs do GCP
-- quando ha varias integracoes, e preciso organizar bem versionamento e ownership por pasta
-
-### Integrations folder per job
-
-Foi escolhido um layout com uma pasta por integracao para facilitar CI por path.
-
-Vantagens:
-
-- cada job pode ter seu proprio Dockerfile e dependencias
-- CI consegue fazer deploy seletivo
-- ownership e manutencao ficam mais claros
+- serverless execution model
+- well-suited for scheduled batch workloads
+- straightforward scaling model
+- clean separation for ingestion runtime ownership
 
 Trade-offs:
 
-- mais repeticao estrutural entre integracoes
-- exige padroes claros para evitar divergencia excessiva entre jobs
+- requires image build and versioning workflows
+- debugging and observability depend heavily on GCP logs
+- as the number of integrations grows, image ownership and release discipline become more important
+
+### One integration folder per job
+
+The repository uses one folder per integration to support path-based CI/CD and runtime separation.
+
+Advantages:
+
+- each job can keep its own Dockerfile and dependency stack
+- CI/CD can deploy only what changed
+- ownership and maintenance boundaries are clearer
+
+Trade-offs:
+
+- some structural repetition across integrations
+- requires standards to avoid excessive divergence between jobs
 
 ### Cloud Composer
 
-Foi escolhido porque o caso pede coordenacao entre ingestao, transformacao e testes com dependencias explicitas.
+Composer was chosen because the platform needs explicit coordination between ingestion, transformation, and testing steps.
 
-Vantagens:
+Advantages:
 
-- Airflow e reconhecido pelo mercado
-- retries, sensores, dependencias e logs sao maduros
-- integra bem com operadores GCP
+- Airflow is widely recognized in enterprise data teams
+- retries, dependencies, sensors, and execution logs are mature
+- strong integration with GCP-native operators
 
 Trade-offs:
 
-- custo fixo alto
-- operacao mais pesada que solucoes serverless puras
-- precisa de disciplina para sincronizar corretamente o conteudo do bucket de DAGs
+- significant fixed cost
+- heavier operational footprint than fully serverless schedulers
+- requires disciplined synchronization of bucket-based deployment artifacts
 
 ### BigQuery
 
-Permanece como warehouse e engine de processamento analitico.
+BigQuery remains the warehouse and analytical execution layer.
 
-Vantagens:
+Advantages:
 
-- executa o dbt diretamente
-- integra com GCS
-- performance boa para analytics
-- baixo overhead operacional
+- runs dbt models directly
+- integrates well with GCS
+- strong performance for analytics workloads
+- low operational overhead compared with self-managed engines
 
 Trade-offs:
 
-- custo por query depende muito de modelagem e filtros
-- exige disciplina com incremental, particionamento e clustering
+- query cost depends heavily on modeling discipline and filter strategy
+- incremental logic, partitioning, and clustering need to be applied intentionally
 
 ### dbt-bigquery
 
-Foi escolhido porque organiza modelagem analitica, testes, snapshots e documentacao de forma clara.
+`dbt-bigquery` was selected to structure analytics transformation, testing, snapshots, and documentation in a maintainable way.
 
-Vantagens:
+Advantages:
 
-- organiza a transformacao em camadas
-- melhora rastreabilidade
-- facilita testes e documentacao
+- supports a layered analytics model design
+- improves traceability of transformation logic
+- makes testing and documentation part of the development workflow
 
 Trade-offs:
 
-- depende de um runtime com dbt instalado
-- por estar embutido no deploy do Composer, requer versionamento cuidadoso desse artefato
+- depends on a runtime where dbt is installed and versioned correctly
+- because it is embedded in the Composer artifact, deployment versioning must stay disciplined
 
 ### GCS
 
-Mantem a camada raw barata, auditavel e reprocessavel.
+GCS keeps the raw layer inexpensive, auditable, and replayable.
 
 Trade-offs:
 
-- adiciona uma etapa a mais entre geracao e consumo analitico
-- exige politica de retencao e organizacao de paths
+- adds another stage between generation and analytics consumption
+- requires retention and path conventions to stay manageable over time
 
-## Principais trade-offs do layout Composer
+## Key trade-offs in the Composer layout
 
-### Por que colocar o dbt dentro de `composer/dags`
+### Why dbt is placed inside `composer/dags`
 
-Motivo:
+Rationale:
 
-- a DAG e o dbt ficam co-localizados
-- o bucket do Composer vira um artefato autocontido
-- o CI pode sincronizar tudo com base em uma unica pasta
-
-Trade-off:
-
-- aumenta o tamanho do artefato sincronizado
-- exige cuidado para nao tratar o bucket do Composer como repositorio primario de desenvolvimento
-
-### Por que manter CI de sync por paths
-
-Motivo:
-
-- reduz deploys desnecessarios
-- separa melhor mudancas de orquestracao de mudancas de infra
+- the DAG and dbt project stay co-located
+- the Composer bucket becomes a self-contained execution artifact
+- CI/CD can synchronize orchestration assets from a single directory root
 
 Trade-off:
 
-- requer convencao clara de onde cada tipo de arquivo deve morar no repositorio
+- increases the size of the synchronized artifact
+- requires discipline so the Composer bucket is not treated as the primary development surface
 
-## Qualidade e observabilidade
+### Why path-based sync CI is preserved
 
-O projeto simula problemas reais:
+Rationale:
 
-- duplicidades
-- nulos
-- energia negativa
-- eventos atrasados
-- instabilidade de status
+- reduces unnecessary deployments
+- separates orchestration changes from infrastructure changes
 
-Controles incluidos:
+Trade-off:
 
-- testes `not null`, `unique`, `accepted_values`
-- testes customizados de freshness e threshold de nulos
-- CI de `dbt` com validacao de dependencias, parse e compile
-- testes unitarios da integracao Python em pull requests
-- logs na DAG
+- requires a clear convention for where each class of asset belongs in the repository
+
+## Data quality and observability
+
+The platform intentionally simulates common upstream issues:
+
+- duplicate events
+- null measurements
+- negative energy values
+- delayed events
+- unstable device status
+
+Included controls:
+
+- `not null`, `unique`, and `accepted_values` tests
+- custom freshness and null-threshold checks
+- `dbt` CI with dependency validation, parsing, and compilation
+- Python unit tests for ingestion behavior in pull requests
+- DAG logs
 - retries
-- etapa final de metricas e alertas mockados
+- final mocked metrics and alert emission
 
-## Desafios comuns em producao
+## Common production challenges
 
-- sincronizar credenciais entre Composer, Cloud Run e BigQuery
-- controlar custos do Composer
-- garantir que o ambiente do Composer tenha o `dbt-bigquery` instalado
-- lidar com reprocessamento sem full refresh
-- versionar o container da ingestao sem drift entre codigo e infraestrutura
-- escalar a estrategia de CI quando houver varias integracoes em paralelo
+- coordinating credentials across Composer, Cloud Run, and BigQuery
+- controlling Composer cost
+- ensuring the Composer environment has `dbt-bigquery` installed
+- handling reprocessing without a full refresh strategy
+- versioning ingestion containers without drift between application code and infrastructure
+- scaling the CI/CD approach as more integrations are added

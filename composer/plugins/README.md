@@ -1,5 +1,5 @@
 # Composer Plugins
 
-Diretorio reservado para plugins customizados do Airflow.
+Directory reserved for custom Airflow plugins.
 
-No momento o projeto nao precisa de plugin Python customizado, mas manter a pasta no repositorio facilita a evolucao do ambiente e o sync completo para o bucket do Composer.
+The current project does not require custom Python plugins yet, but keeping this folder in the repository makes the Composer deployment artifact complete and leaves room for future environment extensions without changing the overall layout.
